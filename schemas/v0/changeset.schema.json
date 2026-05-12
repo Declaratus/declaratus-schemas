@@ -1,20 +1,519 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/Declaratus/declaratus-schemas/v0.0.1/schemas/v0/changeset.schema.json",
+  "$id": "https://raw.githubusercontent.com/Declaratus/declaratus-schemas/v0.1.0/schemas/v0/changeset.schema.json",
   "title": "Changeset",
-  "description": "Per-board changeset application schema. Stub for Phase 0; full shape is designed in Phase A1 against real change docs (Tufin, AAP backfill) before any tool consumes it.",
+  "description": "Per-board changeset, applied by mendrik against an existing GitHub Projects v2 board (and Linear once plynth Linear support lands). Shape designed in Phase A1 against three real change-doc shapes: per-issue body amendments, multi-wave reconciliations, and tabular bulk backfills. See examples/ for sanitized synthetic fixtures covering each shape.",
   "type": "object",
-  "required": ["schema_version", "platform"],
+  "required": ["schema_version", "platform", "changeset_id"],
   "additionalProperties": false,
   "properties": {
     "schema_version": {
       "type": "string",
-      "description": "Schema version of this document. v0.0.1 is the Phase 0 stub; expect substantial additions in v0.1.0 once Phase A1 lands."
+      "pattern": "^0\\.1\\.\\d+$",
+      "description": "Schema version of this document. 0.1.x is the first applier-consumable line; 0.0.1 (the Phase 0 stub) is deprecated and applier rejects it."
     },
     "platform": {
+      "$ref": "#/$defs/Platform"
+    },
+    "changeset_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Stable identifier for this changeset within its board's repo. Lowercase, kebab-case. Used as the directory name under .mendrik/changesets/ and as the apply-report filename stem."
+    },
+    "source": {
+      "$ref": "#/$defs/Source"
+    },
+    "board": {
+      "$ref": "#/$defs/BoardRef"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Operator-facing prose. One paragraph, plain text. Surfaced in mendrik apply --dry-run output and in the apply report header."
+    },
+    "modifications": {
+      "type": "array",
+      "description": "Per-issue mutations that don't fit the bulk-table shape: title renames, body amendments, status changes paired with comments, decision cross-references.",
+      "items": {"$ref": "#/$defs/Modification"}
+    },
+    "new_tasks": {
+      "type": "array",
+      "description": "Issues to create on the board. v0 caveat: mendrik delegates creation to plynth and emits these as pending_external_actions of target=plynth-create. Schema accepts them now so the changeset shape stabilizes; applier behavior catches up in v0.2.",
+      "items": {"$ref": "#/$defs/NewTask"}
+    },
+    "field_updates": {
+      "type": "array",
+      "description": "Flat {issue, field, value} bulk-table mutations. Suited to Phase B/C-style backfill where one row per issue+field is the natural form. Applier MUST apply field_options before field_updates so any new option values referenced here resolve.",
+      "items": {"$ref": "#/$defs/FieldUpdate"}
+    },
+    "field_options": {
+      "type": "array",
+      "description": "Declarative full-desired-state for single-select field options (add new, rename, recolor). GraphQL updateProjectV2Field replaces the full options list, so applier MUST read current options, merge, write. Each entry under desired_options is the COMPLETE set for that field after apply; omitting an existing option deletes it (and its item values).",
+      "items": {"$ref": "#/$defs/FieldOptionDeclaration"}
+    },
+    "decisions": {
+      "type": "array",
+      "description": "Decision-register entries surfacing from the changeset: things the operator is choosing between or has chosen. Distinct from modifications (which apply mutations) — decisions document context that other modifications may reference via decisions_resolved.",
+      "items": {"$ref": "#/$defs/Decision"}
+    },
+    "pending_external_actions": {
+      "type": "array",
+      "description": "Out-of-band TODOs the applier cannot execute: doc-site updates, vendor follow-ups, inventory record-store updates, registry updates, new-issue creation (v0). Applier emits each as a checklist row in the apply report; operator executes by hand.",
+      "items": {"$ref": "#/$defs/PendingExternalAction"}
+    }
+  },
+
+  "$defs": {
+
+    "DateLike": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})?)?$",
+      "description": "ISO date (YYYY-MM-DD) or full ISO date-time. Bare YYYY-MM-DD in source YAML expands to ISO date-time after YAML→JSON conversion; both forms are accepted."
+    },
+
+    "Platform": {
       "type": "string",
       "enum": ["github_projects", "linear"],
-      "description": "Board substrate this changeset targets. github_projects ships in v0; linear lands alongside plynth's Linear support, which is first on the plynth roadmap."
+      "description": "Board substrate this changeset targets. github_projects is the only applier-supported value in v0.1.x; linear lands alongside plynth's Linear support. Low-level mutation primitives differ by platform; substrate-specific fields nest under a future `platform_specific` block (not present in v0.1.x because the github_projects shape covers all current primitives).",
+      "$comment": "When Linear support lands, prefer a discriminated nested block (`linear: { ... }`) over per-field platform discriminators. Keeps the high-level changeset structure (modifications, new_tasks, decisions) substrate-agnostic."
+    },
+
+    "Color": {
+      "type": "string",
+      "enum": ["GRAY", "BLUE", "GREEN", "YELLOW", "ORANGE", "RED", "PINK", "PURPLE"],
+      "description": "GitHub Projects v2 single-select option color enum. Exactly the eight values the GraphQL API accepts."
+    },
+
+    "IssueRef": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9-]*-\\d+$|^\\d+$",
+      "description": "Issue reference. Accepts project-prefixed IDs (e.g., WS-005, PROJ-042) and plain GitHub issue numbers. The board's plynth state file disambiguates."
+    },
+
+    "FieldName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Project field name as it appears on the board. Applier resolves the field-ID at apply time. Free-form because v0 supports custom fields, not just Status/Workstream/etc."
+    },
+
+    "OptionValue": {
+      "oneOf": [
+        {"type": "string"},
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "number"}
+      ],
+      "description": "Option label as written in the changeset. Applier resolves to option-id via tolerant match (exact > prefix > tokenized) and fails loudly if ambiguous. Shorthand (e.g., \"Tier 1\") matches canonical option names (e.g., \"Tier 1 — Visibility\"). Null is permitted for explicit \"clear this field\". Numeric/boolean for non-single-select field types."
+    },
+
+    "Source": {
+      "type": "object",
+      "description": "Provenance of the changeset narrative — what document(s) it translates, when reconciled, why.",
+      "additionalProperties": false,
+      "properties": {
+        "document": {
+          "type": "string",
+          "description": "Path or filename of the primary source document (markdown change doc)."
+        },
+        "reconciliation_date": {
+          "$ref": "#/$defs/DateLike",
+          "description": "ISO date when this changeset was reconciled from source(s)."
+        },
+        "origin_date": {
+          "$ref": "#/$defs/DateLike",
+          "description": "ISO date of the source document itself when single-wave."
+        },
+        "origin_dates": {
+          "type": "object",
+          "description": "Multi-wave origin dates when the changeset reconciles more than one source. Keys are wave labels, values are ISO dates.",
+          "additionalProperties": {"$ref": "#/$defs/DateLike"}
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Operator prose: why this changeset exists, what waves it merges, conflict-resolution rules applied."
+        },
+        "supersedes": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Earlier change documents this changeset replaces. Preserved for traceability; the applier doesn't act on them."
+        }
+      }
+    },
+
+    "BoardRef": {
+      "type": "object",
+      "description": "Where this changeset applies. Applier validates that --board matches this reference before mutating.",
+      "additionalProperties": false,
+      "required": ["target", "project"],
+      "properties": {
+        "target": {
+          "type": "string",
+          "format": "uri",
+          "description": "Host of the board. github.com for public Declaratus/personal; internal GHES instances for internal boards."
+        },
+        "project": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner"],
+          "properties": {
+            "owner": {
+              "type": "string",
+              "description": "Organization or user that owns the project."
+            },
+            "number": {
+              "oneOf": [
+                {"type": "integer", "minimum": 1},
+                {"type": "string", "const": "TBD"}
+              ],
+              "description": "ProjectV2 number. \"TBD\" permitted during authoring; applier rejects \"TBD\" at --apply time."
+            },
+            "name_hint": {
+              "type": "string",
+              "description": "Human-readable project name. Operator-facing only; applier matches by number."
+            }
+          }
+        }
+      }
+    },
+
+    "BodyMutation": {
+      "type": "object",
+      "description": "One body-section mutation. Action determines which other fields are required.",
+      "required": ["section", "action"],
+      "additionalProperties": false,
+      "properties": {
+        "section": {
+          "type": "string",
+          "description": "Managed section header in the issue body (e.g., \"Acceptance Criteria\", \"Notes\"). Applier creates the section if it doesn't exist rather than failing."
+        },
+        "action": {
+          "type": "string",
+          "enum": ["append", "replace_line", "replace_section", "rewrite_section"],
+          "description": "append: add text under the section. replace_line: substring-match a line and substitute. replace_section: drop existing section content, write new_text. rewrite_section: same as replace_section but signals \"this is a periodic consolidation, not a content change\" — applier records the prior content in the apply report so the rewrite is auditable."
+        },
+        "text": {"type": "string", "description": "Used by action=append."},
+        "match": {"type": "string", "description": "Used by action=replace_line. Substring match; applier errors if multiple lines match or no line matches."},
+        "with": {"type": "string", "description": "Used by action=replace_line. Replacement line content."},
+        "new_text": {"type": "string", "description": "Used by action=replace_section and action=rewrite_section. Full content for the section after the mutation."}
+      },
+      "oneOf": [
+        {
+          "properties": {"action": {"const": "append"}},
+          "required": ["text"]
+        },
+        {
+          "properties": {"action": {"const": "replace_line"}},
+          "required": ["match", "with"]
+        },
+        {
+          "properties": {"action": {"const": "replace_section"}},
+          "required": ["new_text"]
+        },
+        {
+          "properties": {"action": {"const": "rewrite_section"}},
+          "required": ["new_text"]
+        }
+      ],
+      "$comment": "replace_line uses substring match (not regex) by design — change docs name lines literally, and substring keeps authoring sane. Anchored or regex variants can be added as new action values (replace_line_regex) without breaking the v0.1 shape."
+    },
+
+    "StatusTransition": {
+      "type": "object",
+      "description": "Status field change paired with a modification. Distinct from a field_updates row because the operator wanted to bundle it with body changes and a comment.",
+      "additionalProperties": false,
+      "required": ["to"],
+      "properties": {
+        "to": {
+          "type": "string",
+          "description": "Target Status option name. Must exist on the board after field_options has applied."
+        },
+        "from": {
+          "type": "string",
+          "description": "Optional pre-condition. If present, applier verifies current status matches before transitioning and fails otherwise."
+        }
+      }
+    },
+
+    "Comment": {
+      "type": "object",
+      "description": "Issue comment to append. v0 only supports append (no edit or delete of existing comments).",
+      "additionalProperties": false,
+      "required": ["action", "text"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["append"],
+          "description": "v0 only supports append."
+        },
+        "text": {"type": "string", "description": "Comment body."}
+      }
+    },
+
+    "Modification": {
+      "type": "object",
+      "description": "Per-issue change bundle.",
+      "required": ["issue", "why"],
+      "additionalProperties": false,
+      "properties": {
+        "issue": {"$ref": "#/$defs/IssueRef"},
+        "why": {
+          "type": "string",
+          "description": "Operator prose explaining the change. Not consumed by the applier; surfaced in the apply report for human review."
+        },
+        "title": {
+          "type": "string",
+          "description": "Issue title rewrite. Full replacement, not transform — caller writes the literal new title."
+        },
+        "status": {"$ref": "#/$defs/StatusTransition"},
+        "body": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/BodyMutation"},
+          "description": "Ordered list of body-section mutations. Applier executes in array order."
+        },
+        "comment": {"$ref": "#/$defs/Comment"},
+        "decisions_resolved": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Decision IDs (matching decisions[*].id) this modification resolves. Applier MUST transition each referenced decision to state=resolved if not already, and record the modification's issue+changeset in the decision's resolution trail. Referential integrity: every ID listed here must appear in this changeset's decisions block."
+        },
+        "sources": {
+          "type": "array",
+          "description": "Structured citation back to source material — wave label and question/section number. Optional but recommended for multi-wave reconciliations.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["wave"],
+            "properties": {
+              "wave": {"type": "string", "description": "Wave label (e.g., \"april-2026\", \"march-roadmap-call\")."},
+              "ref": {"type": "string", "description": "Sub-reference within the wave (e.g., \"Q12\", \"§7.2\")."}
+            }
+          }
+        }
+      },
+      "anyOf": [
+        {"required": ["title"]},
+        {"required": ["status"]},
+        {"required": ["body"]},
+        {"required": ["comment"]},
+        {"required": ["decisions_resolved"]}
+      ],
+      "$comment": "anyOf enforces that a modification actually mutates something. A bare {issue, why} is rejected — that belongs in source.rationale, not modifications."
+    },
+
+    "NewTask": {
+      "type": "object",
+      "description": "Issue to create. v0 caveat in top-level description: applier defers creation to plynth in v0.1 (emits as pending_external_action target=plynth-create).",
+      "required": ["id", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/IssueRef"},
+        "title": {"type": "string", "description": "Issue title."},
+        "workstream": {"type": "string", "description": "Workstream field value at creation."},
+        "priority": {"type": "string", "description": "Priority field value at creation."},
+        "milestone": {"type": "string", "description": "Milestone field value at creation."},
+        "requires_external": {
+          "type": "string",
+          "description": "External Dependency field value at creation. \"None\" if no external dependency."
+        },
+        "description": {"type": "string", "description": "Long-form issue body intro before the Scope / Acceptance Criteria sections."},
+        "scope": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Bullet items for the Scope section. Each item becomes one bullet in the rendered body."
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Bullet items for the Acceptance Criteria section."
+        },
+        "dependencies": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Structured dependency declarations. Applier files native GitHub issue-dependency links for blocked_by and blocks; informs and external are rendered into the body and the External Dependency field respectively.",
+          "properties": {
+            "blocked_by": {"type": "array", "items": {"$ref": "#/$defs/IssueRef"}},
+            "blocks": {"type": "array", "items": {"$ref": "#/$defs/IssueRef"}},
+            "informs": {"type": "array", "items": {"$ref": "#/$defs/IssueRef"}},
+            "external": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "Free-form external dependency descriptors (vendor names, upstream project names). Reserved space for v0; v1 may structure into role + name."
+            }
+          }
+        },
+        "sources": {
+          "type": "array",
+          "description": "Structured citation back to source material — wave label and RFC/question/section number. Same shape as Modification.sources; useful when a new task originates from a specific planning artifact.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["wave"],
+            "properties": {
+              "wave": {"type": "string"},
+              "ref": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+
+    "FieldUpdate": {
+      "type": "object",
+      "description": "One bulk-table assignment. Flat triples are the v0 design. The largest Phase A1 fixture exercised ~135 entries; if 300+ becomes routine in real use, revisit nested-by-issue shape in v0.2.",
+      "required": ["issue", "field", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "issue": {"$ref": "#/$defs/IssueRef"},
+        "field": {"$ref": "#/$defs/FieldName"},
+        "value": {"$ref": "#/$defs/OptionValue"},
+        "note": {
+          "type": "string",
+          "description": "Operator prose for this row (e.g., plan-table rationale). Not consumed by the applier; surfaced in the apply report."
+        },
+        "derivation_hint": {
+          "type": "string",
+          "enum": ["explicit", "default-then-override", "body-lean", "rule-derived"],
+          "description": "How this value was chosen. explicit: source doc named it. default-then-override: applier should warn if operator hasn't reviewed per-row. body-lean: operator inferred from issue body wording. rule-derived: computed from another field. Applier prints a banner when any non-explicit values exist and a final-pass-review hasn't been recorded."
+        }
+      }
+    },
+
+    "FieldOptionDeclaration": {
+      "type": "object",
+      "description": "Full desired-state for one single-select field's options. Replaces (not merges) — every option that should exist after apply MUST appear in desired_options. Omission deletes (along with item field values).",
+      "required": ["field", "desired_options"],
+      "additionalProperties": false,
+      "properties": {
+        "field": {"$ref": "#/$defs/FieldName"},
+        "why": {"type": "string", "description": "Operator prose explaining the option-set change (new states, recolor scheme, etc.)."},
+        "desired_options": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": {"type": "string", "description": "Option label. Applier matches existing options by name; unmatched names are created."},
+              "color": {"$ref": "#/$defs/Color"},
+              "description": {"type": "string", "description": "Option description shown in the project UI. Applier preserves existing descriptions when this is omitted."},
+              "rationale": {"type": "string", "description": "Operator-facing note explaining color/group choice. Not written to the board."},
+              "group": {"type": "string", "description": "Thematic group label used by operator-facing tooling (e.g., grouping ten options into two color-themes). Not written to the board."}
+            }
+          }
+        },
+        "migration": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "How to remap existing item values when option names change. Required when desired_options omits a name that exists on the live field.",
+          "properties": {
+            "from_to": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["from", "to"],
+                "properties": {
+                  "from": {"type": "string", "description": "Existing option name."},
+                  "to": {"type": "string", "description": "Replacement option name in desired_options."},
+                  "condition": {"type": "string", "description": "Plain prose describing when this remap applies (operator-readable; not machine-evaluated)."}
+                }
+              }
+            },
+            "derivation_note": {
+              "type": "string",
+              "description": "Prose explaining migration rules the applier cannot mechanize."
+            },
+            "requires_worksheet": {
+              "type": "boolean",
+              "description": "If true, applier halts after creating new options and emits a CSV worksheet of every item affected. Operator fills in target values and re-runs with --worksheet <path>. Default false."
+            }
+          }
+        }
+      }
+    },
+
+    "Decision": {
+      "type": "object",
+      "description": "Decision-register entry. Captures context, options, and current state of a choice the operator is making or has made.",
+      "required": ["id", "title", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "Stable decision ID. Lowercase, kebab-case. Referenced by Modification.decisions_resolved."
+        },
+        "title": {"type": "string", "description": "One-line decision statement."},
+        "state": {
+          "type": "string",
+          "enum": ["open", "lean-pursue", "lean-defer", "resolved", "deferred", "superseded"],
+          "description": "Controlled state vocabulary. lean-* states signal a working position not yet ratified. Anything decision-specific (which option won) belongs in resolution, not state. resolved implies a resolution string is present."
+        },
+        "context": {"type": "string", "description": "Background prose: why this is a decision, what's at stake."},
+        "options": {
+          "type": "array",
+          "description": "Labeled alternatives the decision is between.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "detail"],
+            "properties": {
+              "label": {"type": "string", "description": "Short identifier (A, B, C, or a name)."},
+              "detail": {"type": "string", "description": "What this option means in practice."}
+            }
+          }
+        },
+        "flags": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Free-form trade-offs or risks attached to the decision. Used when options aren't enumerated as discrete choices but the decision still has named considerations."
+        },
+        "affects": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IssueRef"},
+          "description": "Issue IDs this decision touches. Cross-references can target any issue in the changeset, whether listed under modifications or field_updates. Applier validates referential integrity."
+        },
+        "owner": {
+          "type": "string",
+          "description": "Who decides. Free-form role/name (e.g., \"maintainers\", \"security-team\", \"product-owner\")."
+        },
+        "next_step": {
+          "type": "string",
+          "description": "Concrete action that advances the decision. What happens before the next state transition."
+        },
+        "resolution": {
+          "type": "string",
+          "description": "Required when state=resolved. The specific resolution chosen (referencing an option label or a free-form outcome)."
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"state": {"const": "resolved"}}, "required": ["state"]},
+          "then": {"required": ["resolution"]}
+        }
+      ]
+    },
+
+    "PendingExternalAction": {
+      "type": "object",
+      "description": "TODO the applier cannot execute. Emitted as a checklist row in the apply report.",
+      "required": ["target", "action"],
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Free-form target descriptor naming who or what executes the action out-of-band. Common shapes: doc-site (site section to update), inventory-record-store (asset/record system), project-memory (architectural-decisions log), dependencies-map (a diagram or registry), vendor-followup (named contact), plynth-create (issue creation deferred to plynth), board-name (a different project board). v1 may convert to a registered enum per project; v0 leaves free-form."
+        },
+        "section": {"type": "string", "description": "Sub-target when relevant (e.g., a doc-site section heading)."},
+        "record": {"type": "string", "description": "Record identifier when target is a record-store (e.g., an inventory or asset system)."},
+        "field": {"type": "string", "description": "Field within record when target+record narrow down to a field-level action."},
+        "action": {
+          "type": "string",
+          "description": "Operator-readable instruction. Can be multi-line. Applier surfaces verbatim in the apply report."
+        }
+      }
     }
   }
 }
