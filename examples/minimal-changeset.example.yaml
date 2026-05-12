@@ -1,0 +1,29 @@
+# Smallest valid changeset.
+# Demonstrates: required top-level fields, one modification with a single body
+# amendment. Use this as the starter template when authoring a new changeset.
+#
+# Validates against: schemas/v0/changeset.schema.json (v0.1.x)
+
+schema_version: "0.1.0"
+platform: github_projects
+changeset_id: minimal-example
+
+board:
+  target: https://github.com
+  project:
+    owner: Declaratus
+    number: 1
+    name_hint: widget-store
+
+summary: |-
+  Single-issue body amendment. Smallest shape the applier accepts.
+
+modifications:
+  - issue: WS-001
+    why: "Document the 0.2.0 release process change in the existing release runbook section."
+    body:
+      - section: "Release Process"
+        action: append
+        text: |-
+          - Run `widget-store release --dry-run` before tagging. Reports any
+            unsynced template + locked-version drift.

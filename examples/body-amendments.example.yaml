@@ -1,0 +1,73 @@
+# Body-mutation primitives, one of each action.
+# Demonstrates: append, replace_line, replace_section, rewrite_section.
+# Each issue uses a different action so the example shows all four shapes
+# in one place.
+#
+# Validates against: schemas/v0/changeset.schema.json (v0.1.x)
+
+schema_version: "0.1.0"
+platform: github_projects
+changeset_id: body-amendments-example
+
+source:
+  document: docs/changesets/02-doc-rework.md
+  reconciliation_date: "2026-05-11"
+  rationale: |-
+    Documentation review surfaced four kinds of edits across the runbook
+    issues. One change per action variant for illustrative purposes.
+
+board:
+  target: https://github.com
+  project:
+    owner: Declaratus
+    number: 1
+
+summary: |-
+  Four body amendments demonstrating each BodyMutation.action value.
+
+modifications:
+
+  # action: append — add a new bullet under an existing section.
+  - issue: WS-014
+    why: "Add the post-install smoke-test step the QA pass introduced."
+    body:
+      - section: "Acceptance Criteria"
+        action: append
+        text: |-
+          - Smoke test: `widget-store --version` exits 0 in a fresh container.
+
+  # action: replace_line — substring-match a single line and substitute.
+  # Applier errors if zero or multiple lines match.
+  - issue: WS-018
+    why: "Schedule changed from 'weekly' to 'biweekly' for the maintenance window."
+    body:
+      - section: "Operational Cadence"
+        action: replace_line
+        match: "Maintenance window runs weekly on Sundays."
+        with:  "Maintenance window runs biweekly on Sundays."
+
+  # action: replace_section — drop existing content, write new_text.
+  # Use when the entire section is being rewritten.
+  - issue: WS-019
+    why: "Rollback procedure replaced wholesale after the 0.2.0 retry semantics changed."
+    body:
+      - section: "Rollback Procedure"
+        action: replace_section
+        new_text: |-
+          - Tag the failing release with `release/<version>-rolled-back`.
+          - `widget-store release rollback --to <previous-version>`.
+          - Verify with `widget-store doctor` before re-opening traffic.
+
+  # action: rewrite_section — same shape as replace_section, but signals
+  # "periodic consolidation, not a content change". Applier records the prior
+  # content in the apply report for auditability.
+  - issue: WS-020
+    why: "Consolidate four append-driven addenda into one coherent Notes section."
+    body:
+      - section: "Notes"
+        action: rewrite_section
+        new_text: |-
+          - Compatible with widget-core >= 0.4.
+          - Windows-only: requires the long-path registry flag.
+          - macOS Apple Silicon: rosetta not required as of 0.2.1.
+          - Linux: glibc 2.31 minimum.
