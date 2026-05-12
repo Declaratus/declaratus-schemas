@@ -1,0 +1,115 @@
+# New-task creation shape.
+# Demonstrates: new_tasks block with workstream/priority/milestone fields,
+# scope + acceptance_criteria arrays, dependencies including blocked_by /
+# blocks / informs / external. Shows the v0.1 caveat: applier emits these
+# as pending_external_actions of target=plynth-create.
+#
+# Validates against: schemas/v0/changeset.schema.json (v0.1.x)
+
+schema_version: "0.1.0"
+platform: github_projects
+changeset_id: new-tasks-example
+
+source:
+  document: docs/changesets/05-q3-additions.md
+  reconciliation_date: "2026-05-11"
+  rationale: |-
+    Three new tasks identified during Q3 planning. Two are blocked on
+    existing in-flight work; one is independent.
+
+board:
+  target: https://github.com
+  project:
+    owner: Declaratus
+    number: 1
+
+summary: |-
+  Three issues to create. WS-101 independent. WS-102 blocked on existing
+  WS-031 (storage format) and informs documentation work. WS-103 carries an
+  external dependency on an upstream library release.
+
+new_tasks:
+
+  - id: WS-101
+    title: "Add `widget-store doctor` self-check command"
+    workstream: Build
+    priority: "P2 — Important"
+    milestone: "0.3.0"
+    requires_external: None
+    description: |-
+      A read-only command that exercises the install: paths exist, lockfile
+      hash matches, plugins load. Single-shot diagnostic for support cases.
+    scope:
+      - "Command discovers config, lockfile, plugin directory."
+      - "Each check writes a single-line PASS/FAIL with context."
+      - "Exit code 0 on all-pass; 1 on any failure."
+      - "No side effects — read-only."
+    acceptance_criteria:
+      - "`widget-store doctor` runs on a fresh install and reports all-PASS."
+      - "`widget-store doctor` on a tampered install reports the specific failure."
+      - "Documented in the troubleshooting section of README.md."
+    dependencies:
+      blocked_by: []
+      blocks: []
+      informs: [WS-005]
+
+  - id: WS-102
+    title: "Migrate state-file readers to MessagePack format"
+    workstream: Build
+    priority: "P1 — Critical"
+    milestone: "0.3.0"
+    requires_external: None
+    description: |-
+      After WS-031 lands, every reader path needs the format switch. State
+      files written by 0.1.x must remain readable until 0.4.0 per the
+      deprecation policy.
+    scope:
+      - "Reader detects format by magic bytes (JSON `{` vs MessagePack `\\x82`/`\\x83`)."
+      - "Writer emits MessagePack only."
+      - "Reader emits a deprecation warning when reading legacy JSON."
+    acceptance_criteria:
+      - "Tests cover round-trip on both formats."
+      - "Reading legacy JSON state file emits a single deprecation warning."
+      - "Writing always produces MessagePack."
+    dependencies:
+      blocked_by: [WS-031]
+      blocks: []
+      informs: [WS-040]
+    sources:
+      - {wave: q3-planning, ref: "RFC-2"}
+
+  - id: WS-103
+    title: "Adopt widget-core 0.5 once its `attach` API ships"
+    workstream: Ecosystem
+    priority: "P3 — When Capacity"
+    milestone: "0.4.0"
+    requires_external: "widget-core upstream"
+    description: |-
+      widget-core's `attach` API will replace our `register_callback` shim.
+      Cleaner integration, fewer monkey-patches. Gated on upstream timing.
+    scope:
+      - "Replace `register_callback` with `widget_core.attach()` once 0.5 is released."
+      - "Drop the compat shim from `compat/widget_core_pre05.py`."
+      - "Tests against widget-core 0.5 and 0.4 (latter via xfail markers until removal)."
+    acceptance_criteria:
+      - "widget-core 0.5 listed as minimum supported version in pyproject.toml."
+      - "Compat shim removed from the repo."
+      - "CI matrix exercises widget-core 0.5 on primary platforms."
+    dependencies:
+      blocked_by: []
+      blocks: []
+      informs: []
+      external: ["widget-core 0.5 release (upstream; ETA unknown)"]
+    sources:
+      - {wave: q3-planning, ref: "RFC-4"}
+
+# v0.1 applier caveat: new_tasks are emitted as pending_external_actions of
+# target=plynth-create in the apply report. plynth owns issue creation; mendrik
+# applies field/body/decision mutations. v0.2 may close this gap.
+pending_external_actions:
+  - target: plynth-create
+    action: |-
+      Create WS-101, WS-102, WS-103 via plynth using the new_tasks block above
+      as input. After creation, re-run mendrik apply to populate any
+      cross-references (the dependencies above are filed as native GitHub
+      issue-dependency links by plynth at creation time).

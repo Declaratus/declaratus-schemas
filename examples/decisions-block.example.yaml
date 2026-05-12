@@ -1,0 +1,133 @@
+# Decisions block: every state value, plus cross-references to modifications.
+# Demonstrates: open, lean-pursue, lean-defer, resolved (with resolution),
+# deferred, superseded. Shows decisions.affects pointing at any issue in
+# the changeset, and modifications.decisions_resolved closing decisions.
+#
+# Validates against: schemas/v0/changeset.schema.json (v0.1.x)
+
+schema_version: "0.1.0"
+platform: github_projects
+changeset_id: decisions-block-example
+
+source:
+  document: docs/changesets/04-platform-decisions.md
+  reconciliation_date: "2026-05-11"
+  rationale: |-
+    Quarterly platform-direction decisions consolidated. Some open, some
+    leaning, some closing.
+
+board:
+  target: https://github.com
+  project:
+    owner: Declaratus
+    number: 1
+
+summary: |-
+  Six decisions covering each state value, two modifications that close
+  decisions via decisions_resolved.
+
+modifications:
+
+  # This modification closes the storage-format decision below.
+  # Applier transitions ws-storage-format-decision to state=resolved (if not
+  # already) and records the modification in its trail.
+  - issue: WS-031
+    why: "Adopt MessagePack for the on-disk state format per ws-storage-format-decision."
+    decisions_resolved: [ws-storage-format-decision]
+    body:
+      - section: "Acceptance Criteria"
+        action: append
+        text: |-
+          - State format switches from JSON to MessagePack.
+          - Migration path: state files written by 0.1.x readable by 0.2.x; 0.2.x writes MessagePack only.
+
+  - issue: WS-040
+    why: "Document the breaking deprecation of the legacy v1 config schema."
+    decisions_resolved: [ws-legacy-config-removal]
+    body:
+      - section: "Notes"
+        action: append
+        text: |-
+          - v1 config schema deprecated in 0.2.0; removed in 0.4.0 per the deprecation policy.
+
+decisions:
+
+  # state: open — no working position yet, options enumerated.
+  - id: ws-release-cadence
+    title: "Release cadence: time-boxed monthly or feature-gated"
+    state: open
+    affects: [WS-051, WS-052, WS-053]
+    context: |-
+      Current ad-hoc cadence has produced four releases in eight months with
+      uneven scope. Two options under discussion; no working position yet.
+    options:
+      - {label: A, detail: "Time-boxed monthly. Predictable, sometimes empty."}
+      - {label: B, detail: "Feature-gated. Quality-stable, unpredictable timing."}
+    owner: maintainers
+    next_step: "Survey contributors on Discord. Decide at the next maintainer meeting."
+
+  # state: lean-pursue — working position established, not yet ratified.
+  - id: ws-storage-format-decision
+    title: "On-disk state format: JSON vs MessagePack"
+    state: lean-pursue
+    affects: [WS-031]
+    context: |-
+      JSON is human-readable. MessagePack is 3-4x smaller and ~2x faster to
+      parse on the cold path. State files are written by the tool, not
+      hand-edited, so the readability argument is weak.
+    options:
+      - {label: JSON, detail: "Status quo. Human-readable, large."}
+      - {label: MessagePack, detail: "Compact binary. Faster cold-path. Not hand-readable."}
+    owner: maintainers
+    next_step: "Confirm at maintainer meeting; modification WS-031 codifies the move."
+
+  # state: lean-defer — working position is to NOT do it.
+  - id: ws-windows-installer
+    title: "Native Windows MSI installer"
+    state: lean-defer
+    affects: []
+    context: |-
+      Asked for twice in the last quarter. Current `pipx install widget-store`
+      flow works on Windows. MSI installer adds signing infrastructure cost
+      against modest demand.
+    flags:
+      - "Code-signing cert renewal becomes a recurring cost."
+      - "Two requests is a weak signal; revisit if it reaches ten."
+    owner: maintainers
+    next_step: "Hold. Re-evaluate at quarterly review if demand grows."
+
+  # state: resolved — required when state=resolved; carries resolution prose.
+  - id: ws-legacy-config-removal
+    title: "Legacy v1 config schema: deprecate now or carry forever"
+    state: resolved
+    affects: [WS-040]
+    context: |-
+      v1 config schema is two majors old. Two known users still pinned to it.
+      Both have been notified.
+    options:
+      - {label: "deprecate-and-remove", detail: "0.2.0 warns, 0.4.0 removes."}
+      - {label: "carry-forever", detail: "Maintain v1 compatibility indefinitely."}
+    resolution: "deprecate-and-remove. Codified in WS-040; deprecation warning in 0.2.0, removal in 0.4.0."
+    owner: maintainers
+
+  # state: deferred — explicit not-now-and-not-soon.
+  - id: ws-plugin-marketplace
+    title: "Plugin marketplace UI"
+    state: deferred
+    affects: []
+    context: |-
+      Discussed in the H1 roadmap session. Real interest, but blocked on a
+      stable plugin API (WS-070), which itself isn't ready.
+    owner: maintainers
+    next_step: "Revisit when WS-070 (stable plugin API) ships."
+
+  # state: superseded — earlier decision replaced by a later one.
+  - id: ws-old-telemetry-decision
+    title: "Telemetry: opt-in vs opt-out (2025 framing)"
+    state: superseded
+    affects: []
+    context: |-
+      Original 2025 decision (opt-out with prominent disclosure) is superseded
+      by the 2026 privacy-policy-driven decision: opt-in only, no exceptions.
+    resolution: "Superseded by ws-telemetry-opt-in-only (separate changeset)."
+    owner: maintainers

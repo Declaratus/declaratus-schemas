@@ -1,0 +1,107 @@
+# Bulk-table shape: field_updates triples and field_options recolor.
+# Demonstrates: flat {issue, field, value} entries with derivation_hint;
+# declarative full-desired-state for single-select options including a
+# migration block with requires_worksheet.
+#
+# Validates against: schemas/v0/changeset.schema.json (v0.1.x)
+
+schema_version: "0.1.0"
+platform: github_projects
+changeset_id: bulk-backfill-example
+
+source:
+  document: docs/changesets/03-tier-backfill.md
+  reconciliation_date: "2026-05-11"
+  rationale: |-
+    Tier and Workstream fields were patchy — undeclared rather than wrong.
+    Backfill explicit values across every open issue so view filters behave.
+
+board:
+  target: https://github.com
+  project:
+    owner: Declaratus
+    number: 1
+
+summary: |-
+  Tier + Workstream backfill across 8 issues. Status field option set recolored
+  per the categorical scale; new "Blocked" state added with a migration block
+  that halts for a per-issue worksheet.
+
+field_updates:
+
+  # Phase B-style backfill: one row per (issue, field). derivation_hint
+  # records how the value was chosen — applier warns if non-explicit values
+  # exist and a final review pass hasn't been recorded.
+
+  - {issue: WS-002, field: Tier, value: "Tier 0",  note: "Inventory of build artifacts", derivation_hint: explicit}
+  - {issue: WS-003, field: Tier, value: "Tier 1",  note: "Build-status visibility",      derivation_hint: explicit}
+  - {issue: WS-004, field: Tier, value: "Tier 2",  note: "Release telemetry",            derivation_hint: explicit}
+  - {issue: WS-005, field: Tier, value: "N/A",     note: "Doc artifact, not on the climb", derivation_hint: explicit}
+  - {issue: WS-006, field: Tier, value: "Tier 1",  derivation_hint: body-lean}
+
+  - {issue: WS-002, field: Workstream, value: Build,         derivation_hint: explicit}
+  - {issue: WS-003, field: Workstream, value: Build,         derivation_hint: explicit}
+  - {issue: WS-004, field: Workstream, value: Release,       derivation_hint: explicit}
+  - {issue: WS-005, field: Workstream, value: Documentation, derivation_hint: explicit}
+  - {issue: WS-006, field: Workstream, value: Ecosystem,     derivation_hint: explicit}
+
+field_options:
+
+  # Declarative full-desired-state. Every option that should exist after
+  # apply MUST appear in desired_options — omission deletes the option (and
+  # its item values). Applier reads current, merges, writes.
+
+  - field: Status
+    why: |-
+      Add "Blocked" state. Recolor existing options per the categorical
+      scale (Backlog gray, Ready blue, In Progress yellow, Blocked red,
+      Done green, Deferred gray).
+    desired_options:
+      - {name: Backlog,         color: GRAY,   rationale: "neutral, not yet committed"}
+      - {name: Ready,           color: BLUE,   rationale: "actionable"}
+      - {name: "In Progress",   color: YELLOW, rationale: "active work"}
+      - {name: Blocked,         color: RED,    rationale: "needs attention (new option)"}
+      - {name: Done,            color: GREEN}
+      - {name: Deferred,        color: GRAY}
+    # No migration block needed: every existing option name is preserved.
+
+  - field: Tier
+    desired_options:
+      - {name: "Tier 0", color: GRAY,   rationale: "inventory baseline"}
+      - {name: "Tier 1", color: BLUE,   rationale: "visibility"}
+      - {name: "Tier 2", color: PURPLE, rationale: "telemetry"}
+      - {name: "N/A",   color: GRAY}
+
+  - field: Workstream
+    why: |-
+      Rename "Ecosystem Outreach" to "Ecosystem" — shorter label fits the
+      view chip better. Existing item values remap via migration block.
+    desired_options:
+      - {name: Build,         color: BLUE}
+      - {name: Documentation, color: GRAY}
+      - {name: Release,       color: GREEN}
+      - {name: Ecosystem,     color: ORANGE}
+    migration:
+      from_to:
+        - {from: "Ecosystem Outreach", to: Ecosystem}
+      derivation_note: |-
+        Pure rename. Every item currently on "Ecosystem Outreach" moves to
+        "Ecosystem". No conditional logic.
+      requires_worksheet: false
+
+  - field: Priority
+    why: |-
+      Introduce P4. Existing P1/P2/P3 unchanged. Operator-completion handoff
+      because we don't have a rule for which P3 items demote to P4.
+    desired_options:
+      - {name: "P1 — Critical", color: RED}
+      - {name: "P2 — Important", color: ORANGE}
+      - {name: "P3 — When Capacity", color: YELLOW}
+      - {name: "P4 — Future", color: GRAY}
+    migration:
+      from_to: []
+      derivation_note: |-
+        P4 is a new option. Some P3 items belong on P4. Applier halts after
+        creating the option and emits a CSV of every P3-tagged item; operator
+        fills in target value and re-runs with --worksheet <path>.
+      requires_worksheet: true
