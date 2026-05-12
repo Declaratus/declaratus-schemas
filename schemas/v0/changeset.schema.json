@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Declaratus/declaratus-schemas/v0.0.1/schemas/v0/changeset.schema.json",
+  "title": "Changeset",
+  "description": "Per-board changeset application schema. Stub for Phase 0; full shape is designed in Phase A1 against real change docs (Tufin, AAP backfill) before any tool consumes it.",
+  "type": "object",
+  "required": ["schema_version", "platform"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Schema version of this document. v0.0.1 is the Phase 0 stub; expect substantial additions in v0.1.0 once Phase A1 lands."
+    },
+    "platform": {
+      "type": "string",
+      "enum": ["github_projects", "linear"],
+      "description": "Board substrate this changeset targets. github_projects ships in v0; linear lands alongside plynth's Linear support, which is first on the plynth roadmap."
+    }
+  }
+}
