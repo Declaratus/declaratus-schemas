@@ -22,7 +22,17 @@ https://raw.githubusercontent.com/Declaratus/declaratus-schemas/v0.1.0/schemas/v
 ```
 
 See [SCHEMA-VERSIONING](docs/SCHEMA-VERSIONING.md) for tag pinning, document versions,
-and consumer vendoring.
+consumer vendoring, and v0.1.0 contract notes.
+
+## Contract tests
+
+`tests/` pins published v0.1.0 behavior: the tagged `$id`, the five examples, and
+the edge cases described in the contract notes. With `pytest`, `jsonschema>=4.18`,
+and `PyYAML` installed, run from the repository root:
+
+```sh
+python -m pytest tests
+```
 
 ## Worked examples
 

@@ -55,6 +55,35 @@ Compatibility rule:
 - A v0.2.0 schema accepts documents with `schema_version` in `[0.1.0, 0.3.0)` — current and one prior minor, because additive changes are forward-compatible.
 - A v1.0.0 schema accepts only `1.x.x` documents. v0 documents go through a migration shim (not yet specified — design when needed).
 
+## v0.1.0 contract notes
+
+These are clarifications of what v0.1.0 already publishes. They do not change
+the schema, and `tests/test_changeset_contract.py` pins them.
+
+- **`board.target`.** All five examples spell GitHub.com as `https://github.com`.
+  Consumers should treat that spelling, the bare `github.com`, and
+  `https://api.github.com` as the same host, and map them to their API roots
+  themselves.
+- **`Decision.resolution`.** When `state` is `resolved`, the schema requires the
+  `resolution` key to be present as a string. An empty string is valid in v0.1.
+  Consumers that check presence should not also require it to be non-empty.
+- **`pattern` engines.** With default, non-multiline ECMA-262 regular
+  expression semantics, `$` matches only at the end of the value. Python's
+  `re`, used by the `jsonschema` package, also lets `$` match before one final
+  newline. Python `jsonschema` therefore accepts `changeset_id: "demo\n"`,
+  while the same pattern under default, non-multiline ECMA-262 regex semantics
+  does not. Multiline mode changes the latter result; this is not a claim
+  about every validator or an Ajv integration test. Authors should not end
+  identifiers with a newline. Consumers using different validation and model
+  engines should make their compatibility choice explicit. Other patterned
+  fields and other engines are outside the parity established by these tests.
+
+Requiring a non-empty `resolution` or universally rejecting previously accepted
+trailing-newline identifiers would tighten acceptance. Under the breaking-change
+policy, that requires a new major contract under `schemas/v1/`, with a new major
+tag and `$id`. Keep v0 published unchanged and document migration explicitly;
+neither a v0.1 patch nor an additive v0.2 release should silently tighten it.
+
 ## Consumer pinning
 
 Each tool repo (`mendrik`, `eyrl`) pins a single version constant:
