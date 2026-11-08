@@ -57,9 +57,20 @@ Compatibility rule:
 
 ## v0.1.0 contract notes
 
-These are clarifications of what v0.1.0 already publishes. They do not change
-the schema, and `tests/test_changeset_contract.py` pins them.
+These clarify the published contract and consumer boundaries without changing
+v0.1.0. `tests/test_changeset_contract.py` pins selected contract behaviors.
 
+- **`DateLike` and YAML loading.** The string pattern checks lexical date/date-time
+  shape, not calendar validity; `"2026-99-99"` matches it. Mendrik's PyYAML loader
+  constructs Python `date`/`datetime` objects from bare dates/timestamps, and
+  schema string validation rejects those objects without converting them to JSON.
+  Quote dates/date-times and mapping keys intended as string labels; see
+  [authoring guidance](CHAT-USAGE.md#when-chat-emits-yaml-do-this).
+- **Validation scope.** Schema-valid does not guarantee consumer semantic checks
+  or execution. Mendrik checks the schema and then its model, which also enforces
+  decision references. `mendrik validate` makes no API calls; live board resolution
+  belongs to `apply --dry-run`. These notes do not alter the immutable v0.1.0
+  schema, examples, tag, or consumer pins.
 - **`board.target`.** All five examples spell GitHub.com as `https://github.com`.
   Consumers should treat that spelling, the bare `github.com`, and
   `https://api.github.com` as the same host, and map them to their API roots
