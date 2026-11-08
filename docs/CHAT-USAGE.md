@@ -26,7 +26,7 @@ brainstorm in chat
   → narrative markdown (the human-readable change doc)
   → structured YAML changeset alongside
   → commit both to the per-board repo under .mendrik/changesets/<id>.{md,yaml}
-  → mendrik validate (schema-check, dry-resolve IDs)
+  → mendrik validate --changeset <file> (schema + model checks; no API calls)
   → mendrik apply --dry-run  (resolved plan JSON)
   → human review
   → mendrik apply --apply
@@ -52,11 +52,18 @@ The narrative markdown and the YAML are separate artifacts. The markdown is for 
 - **Cite the source.** Put the markdown filename in `source.document` and a one-paragraph `source.rationale`. Multi-wave reconciliations use `source.origin_dates: {wave_name: date}`.
 - **Write `why:` prose on every modification.** Not for the applier; for the human reading the apply report. One sentence is fine.
 - **Prefer `field_updates` over `modifications.status` for tabular Status changes.** `modifications` is for richer bundles (body + status + comment + decisions_resolved).
-- **Quote dates.** YAML auto-types bare `2026-05-11` to a Date object, which round-trips through JSON as ISO date-time. The schema accepts both forms, but `"2026-05-11"` is plain.
+- **Quote dates and date-times for Mendrik.** Its PyYAML loader turns bare dates/timestamps into Python `date`/`datetime` objects, which fail the schema's string validation. It does not silently convert YAML into JSON. Write `"2026-05-11"` or `"2026-05-11T12:00:00Z"`.
+- **Quote mapping keys intended as string labels.** For example, use `source.origin_dates: {"1": "2026-05-11"}`. JSON object keys are strings; bare `1` becomes a YAML integer key and Mendrik rejects it during model validation.
 - **Write identifiers as single-line quoted strings.** `changeset_id: "my-change"` avoids YAML interpreting values such as `123`, `true`, or `null` as non-string types, and avoids the trailing newline added by a `|` block.
 - **Use the canonical option names.** "Tier 1 — Visibility" matches the board option exactly. "Tier 1" alone works (applier resolves by prefix), but exact match is unambiguous.
 - **Don't omit options in `field_options[].desired_options`.** GraphQL `updateProjectV2Field` deletes any omitted option (and its item values). The schema's required `migration` block exists for renames, not implicit deletions.
 - **One source of truth per decision.** A `decision` block names the choice; a `modification` that closes it references the ID via `decisions_resolved: [...]`. Don't restate the resolution in both places.
+
+`DateLike` checks lexical shape, not calendar validity: even `"2026-99-99"`
+matches the published pattern. Schema-valid does not imply all consumer semantics
+or successful execution. Mendrik also checks the model (including decision
+references); live board resolution happens during `apply --dry-run`. See the
+[v0.1.0 contract notes](SCHEMA-VERSIONING.md#v010-contract-notes).
 
 ## Public / private boundary
 
